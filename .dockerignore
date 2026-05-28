@@ -1,0 +1,49 @@
+# Docker ignore file for VoltDB examples
+# Excludes unnecessary files from Docker build context
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+
+# Build outputs (will be rebuilt in container)
+**/target/
+
+# Test sources - not needed for running or building example apps
+# (Jenkins runs integration tests directly on host, not inside Docker)
+**/src/test/
+
+# Documentation (not needed in container)
+*.md
+!docker/README.md
+!**/README.md
+!demo-runner/README.md
+LICENSE
+
+# Docker files (avoid recursive issues, but keep scripts)
+docker/k8s/
+docker/Makefile
+docker/docker-compose.yml
+docker/README.md
+
+# Logs and temp files
+*.log
+*.tmp
+*.bak
+
+# Node.js
+**/node_modules/
+demo-runner/client/dist/
+
+# Claude
+.claude/
+
+# OS files
+.DS_Store
+Thumbs.db

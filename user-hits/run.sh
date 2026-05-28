@@ -1,0 +1,170 @@
+#!/usr/bin/env bash
+
+mydir=$(dirname $0)
+source $mydir/../voltsetup
+
+APPNAME="userhitclient"
+: ${SERVERS:=localhost}
+
+LOG4J="./log4j.xml"
+HOST="localhost"
+
+if [ -z "$DB_LIB" ]; then
+    echo "DB_LIB is not set; why?"
+    exit 2
+fi
+
+CLIENTLIBS=$({ \
+    \ls -1 "$DB_LIB"/jackson-annotations-*.jar; \
+    \ls -1 "$DB_LIB"/jackson-core-*.jar; \
+    \ls -1 "$DB_LIB"/jackson-databind-*.jar; \
+    \ls -1 "$DB_LIB"/jackson-dataformat-cbor-*.jar; \
+    \ls -1 "$DB_LIB"/avro-*.jar; \
+    \ls -1 "$DB_LIB"/kafka-clients-*.jar; \
+    \ls -1 "$DB_LIB"/log4j-*.jar; \
+    \ls -1 "$DB_LIB"/slf4j-*.jar; \
+    \ls -1 "$DB_DIST"/voltdb-*.jar; \
+} 2> /dev/null | paste -sd ':' - )
+CLIENTCLASSPATH=$CLIENTLIBS:$CLIENTCLASSPATH
+CLIENTCLASSPATH=./userhit-server.jar:$CLIENTCLASSPATH
+
+# remove build artifacts
+function clean() {
+    rm -rf obj debugoutput voltdbroot statement-plans catalog-report.html log *.jar *.csv
+    find . -name '*.class' | xargs rm -f
+    rm -rf voltdbroot
+}
+
+# Grab the necessary command line arguments
+function parse_command_line() {
+    OPTIND=1
+    # Return the function to run
+    shift $(($OPTIND - 1))
+    RUN=$@
+}
+
+function clientcompile() {
+    echo
+    echo "Compile client CLIENTCLASSPATH=\"${CLIENTCLASSPATH}\""
+    echo
+    javac -classpath $CLIENTCLASSPATH src/client/*.java
+    # stop if compilation fails
+    if [ $? != 0 ]; then exit; fi
+    jar cf userhit-client.jar -C src client
+}
+
+# Note: using APPCLASSPATH instead of CLIENTCLASSPATH
+function servercompile() {
+    echo
+    echo "Compile server APPCLASSPATH=\"${APPCLASSPATH}\""
+    echo
+    javac -classpath $APPCLASSPATH src/server/*.java
+    # stop if compilation fails
+    if [ $? != 0 ]; then exit; fi
+    jar cf userhit-server.jar -C src server
+}
+
+function clientcompile-ifneeded() {
+  if [ ! -e userhit-client.jar ] ; then
+      clientcompile;
+  fi
+}
+
+function servercompile-ifneeded() {
+  if [ ! -e userhit-server.jar ] ; then
+      servercompile;
+  fi
+}
+
+# Need to compile server before client
+function srccompile-ifneeded() {
+  servercompile-ifneeded
+  clientcompile-ifneeded
+}
+
+# compile
+function jars() {
+    servercompile
+    clientcompile
+}
+
+function jars-ifneeded() {
+    srccompile-ifneeded
+}
+
+function server() {
+    srccompile-ifneeded
+    voltdb init --force -C deployment.xml
+    server_common
+}
+
+# Note - flight recording requires J11 on my Mac
+function server_common() {
+    # DB_OPTS="${DB_OPTS} -Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote.port=9999 -Dcom.sun.management.jmxremote.authenticate=false -Dcom.sun.management.jmxremote.ssl=false"
+    # DB_OPTS="${DB_OPTS} -XX:StartFlightRecording=dumponexit=false"
+    [[ -d log && -w log ]] && > log/voltdb.log
+    # run the server
+    echo "Starting the database server."
+    echo "To perform this action manually, use the command line: "
+    echo
+    echo "  DB_OPTS=\"${DB_OPTS}\" voltdb start -H $HOST"
+    echo
+    echo "DB_BIN=\"${VOLTDB_BIN}\""
+    echo
+    echo "LOG4J=\"${LOG4J}\""
+    echo
+    VOLTDB_OPTS="${VOLTDB_OPTS}" voltdb start -H $HOST
+}
+
+# load schema and procedures
+function init() {
+    srccompile-ifneeded
+    sqlcmd --servers=$SERVERS < ddl.sql
+}
+
+function client() {
+    run-producer
+}
+
+function run-producer() {
+  srccompile-ifneeded
+  java $JAVA_OPTS -classpath userhit-client.jar:$CLIENTCLASSPATH -Dlog4j.configuration=file:${LOG4J} \
+      client.UserHitClient \
+      --servers=localhost
+}
+
+function run-client() {
+  srccompile-ifneeded
+  java $JAVA_OPTS -classpath userhit-client.jar:$CLIENTCLASSPATH -Dlog4j.configuration=file:${LOG4J} \
+      client.UserHitClient \
+      --servers=localhost \
+      --produce=false
+}
+# Help!
+function help() {
+echo "
+Usage: run.sh TARGET
+
+Targets:
+    clean
+    jars | jars-ifneeded | servercompile | clientcompile
+    server | init
+    run-producer | run-client
+
+tl;dr:
+    ./run.sh server         compiles jars and starts server
+    ./run.sh init           loads DDL
+
+    then choose one of:
+    ./run-sh run-producer   runs test using Kafka producer to VoltDB topic
+    ./run.sh run-client     runs test using VoltDB Client
+"
+}
+
+parse_command_line $@
+if [ -n "$RUN" ]; then
+    echo $RUN
+    $RUN
+else
+    help
+fi

@@ -1,0 +1,81 @@
+-- VoltDB DDL Schema for DDoS Detection
+
+-- Primary table: REQUESTS (partitioned on SOURCE_IP)
+CREATE TABLE REQUESTS (
+    REQUEST_ID bigint NOT NULL,
+    SOURCE_IP varchar(45) NOT NULL,
+    DOMAIN varchar(255) NOT NULL,
+    REQUEST_TIME timestamp NOT NULL,
+    BLOCKED tinyint DEFAULT 0 NOT NULL,
+    PRIMARY KEY (REQUEST_ID, SOURCE_IP)
+);
+PARTITION TABLE REQUESTS ON COLUMN SOURCE_IP;
+CREATE INDEX REQ_TIME_IDX ON REQUESTS (SOURCE_IP, REQUEST_TIME);
+
+-- Co-located table: BLOCKED_IPS (partitioned on SOURCE_IP)
+CREATE TABLE BLOCKED_IPS (
+    SOURCE_IP varchar(45) NOT NULL,
+    DOMAIN varchar(255),
+    BLOCKED_TIME timestamp NOT NULL,
+    REASON varchar(100) NOT NULL,
+    RULE_NAME varchar(20) NOT NULL,
+    PRIMARY KEY (SOURCE_IP, BLOCKED_TIME)
+);
+PARTITION TABLE BLOCKED_IPS ON COLUMN SOURCE_IP;
+
+-- Replicated table: DOMAINS (small reference table of monitored domains)
+CREATE TABLE DOMAINS (
+    DOMAIN varchar(255) NOT NULL,
+    OWNER varchar(100) NOT NULL,
+    MAX_REQUESTS_PER_IP integer DEFAULT 100 NOT NULL,
+    PRIMARY KEY (DOMAIN)
+);
+
+-- Materialized view: requests per IP per domain in 1-second window (for Rule 1)
+CREATE VIEW REQUESTS_PER_IP_DOMAIN_1SEC (
+    SOURCE_IP,
+    DOMAIN,
+    WINDOW_1SEC,
+    REQUEST_COUNT
+) AS
+    SELECT SOURCE_IP,
+           DOMAIN,
+           TIME_WINDOW(SECOND, 1, REQUEST_TIME) AS WINDOW_1SEC,
+           COUNT(*) AS REQUEST_COUNT
+    FROM REQUESTS
+    GROUP BY SOURCE_IP, DOMAIN, TIME_WINDOW(SECOND, 1, REQUEST_TIME);
+
+-- Materialized view: requests per IP across all domains in 1-second window (for Rule 2)
+CREATE VIEW REQUESTS_PER_IP_1SEC (
+    SOURCE_IP,
+    WINDOW_1SEC,
+    REQUEST_COUNT
+) AS
+    SELECT SOURCE_IP,
+           TIME_WINDOW(SECOND, 1, REQUEST_TIME) AS WINDOW_1SEC,
+           COUNT(*) AS REQUEST_COUNT
+    FROM REQUESTS
+    GROUP BY SOURCE_IP, TIME_WINDOW(SECOND, 1, REQUEST_TIME);
+
+-- DDL-defined procedures (single SQL statement, no Java class needed)
+DROP PROCEDURE GetBlockedIps IF EXISTS;
+CREATE PROCEDURE GetBlockedIps
+    PARTITION ON TABLE BLOCKED_IPS COLUMN SOURCE_IP
+    AS SELECT * FROM BLOCKED_IPS WHERE SOURCE_IP = ? ORDER BY BLOCKED_TIME DESC;
+
+DROP PROCEDURE UpsertDomain IF EXISTS;
+CREATE PROCEDURE UpsertDomain
+    AS UPSERT INTO DOMAINS (DOMAIN, OWNER, MAX_REQUESTS_PER_IP) VALUES (?, ?, ?);
+
+DROP PROCEDURE SearchBlockedIps IF EXISTS;
+CREATE PROCEDURE SearchBlockedIps
+    AS SELECT * FROM BLOCKED_IPS WHERE RULE_NAME = ? ORDER BY BLOCKED_TIME DESC;
+
+-- Java class procedures (multiple SQL statements or Java logic)
+DROP PROCEDURE com.example.voltdb.procedures.ProcessRequest IF EXISTS;
+CREATE PROCEDURE PARTITION ON TABLE REQUESTS COLUMN SOURCE_IP
+    FROM CLASS com.example.voltdb.procedures.ProcessRequest;
+
+DROP PROCEDURE com.example.voltdb.procedures.GetRequestsByIp IF EXISTS;
+CREATE PROCEDURE PARTITION ON TABLE REQUESTS COLUMN SOURCE_IP
+    FROM CLASS com.example.voltdb.procedures.GetRequestsByIp;

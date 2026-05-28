@@ -1,0 +1,208 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>org.voltdb</groupId>
+    <artifactId>examples</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <name>VoltDB Examples</name>
+    <description>Parent project for VoltDB examples</description>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+
+        <volt.client.version>13.3.14</volt.client.version>
+        <volt.procedure.api.version>15.0.0</volt.procedure.api.version>
+        <volt.testcontainer.version>1.9.0</volt.testcontainer.version>
+        <guava.version>33.0.0-jre</guava.version>
+        <slf4j.version>2.0.9</slf4j.version>
+        <junit.version>4.13.2</junit.version>
+        <junit-jupiter.version>5.10.0</junit-jupiter.version>
+
+        <!-- Benchmark skip default: parent and modules without a benchmark skip by default.
+             Modules with a benchmark class override this to `false` in their own <properties>. -->
+        <benchmark.skip>true</benchmark.skip>
+        <benchmark.classpathScope>test</benchmark.classpathScope>
+    </properties>
+
+    <modules>
+        <module>adperformance</module>
+        <module>bank-offers</module>
+        <module>callcenter</module>
+        <module>client2</module>
+        <module>ddos-detection</module>
+        <module>fraud-detection</module>
+        <module>geospatial</module>
+        <module>json-sessions</module>
+        <module>nbbo</module>
+        <module>positionkeeper</module>
+        <module>simple</module>
+        <module>uniquedevices</module>
+        <module>voltkv</module>
+        <module>voter</module>
+        <module>windowing</module>
+    </modules>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- VoltDB -->
+            <dependency>
+                <groupId>org.voltdb</groupId>
+                <artifactId>voltdbclient</artifactId>
+                <version>${volt.client.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.voltdb</groupId>
+                <artifactId>volt-procedure-api</artifactId>
+                <version>${volt.procedure.api.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.voltdb</groupId>
+                <artifactId>volt-testcontainer</artifactId>
+                <version>${volt.testcontainer.version}</version>
+            </dependency>
+
+            <!-- Common -->
+            <dependency>
+                <groupId>com.google.guava</groupId>
+                <artifactId>guava</artifactId>
+                <version>${guava.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.slf4j</groupId>
+                <artifactId>slf4j-simple</artifactId>
+                <version>${slf4j.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>junit</groupId>
+                <artifactId>junit</artifactId>
+                <version>${junit.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.junit.jupiter</groupId>
+                <artifactId>junit-jupiter</artifactId>
+                <version>${junit-jupiter.version}</version>
+            </dependency>
+
+            <!-- Transitive CVE fixes -->
+            <!-- commons-io: fixes CVE-2024-47554 (need >= 2.14.0)
+                 Using 2.18.0 so commons-compress can call FileTimes.toUnixTime (added in 2.16) -->
+            <dependency>
+                <groupId>commons-io</groupId>
+                <artifactId>commons-io</artifactId>
+                <version>2.18.0</version>
+            </dependency>
+            <dependency>
+                <groupId>org.codehaus.plexus</groupId>
+                <artifactId>plexus-utils</artifactId>
+                <version>4.0.3</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <!-- Add non-standard source dirs: client/ and procedures/ -->
+                <!-- Children opt-in by listing this plugin in their own <build><plugins>. -->
+                <plugin>
+                    <groupId>org.codehaus.mojo</groupId>
+                    <artifactId>build-helper-maven-plugin</artifactId>
+                    <version>3.4.0</version>
+                    <executions>
+                        <execution>
+                            <id>add-source</id>
+                            <phase>generate-sources</phase>
+                            <goals><goal>add-source</goal></goals>
+                            <configuration>
+                                <sources>
+                                    <source>client</source>
+                                    <source>procedures</source>
+                                </sources>
+                            </configuration>
+                        </execution>
+                    </executions>
+                </plugin>
+
+                <!-- Run integration tests (*IT.java) -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-failsafe-plugin</artifactId>
+                    <version>3.2.5</version>
+                    <executions>
+                        <execution>
+                            <goals>
+                                <goal>integration-test</goal>
+                                <goal>verify</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                </plugin>
+
+                <plugin>
+                    <groupId>org.codehaus.mojo</groupId>
+                    <artifactId>exec-maven-plugin</artifactId>
+                    <version>3.1.0</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
+
+    <profiles>
+        <!-- Benchmark profile: runs ${benchmark.class} with test-scope classpath -->
+        <profile>
+            <id>benchmark</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>run-benchmark</id>
+                                <phase>integration-test</phase>
+                                <goals><goal>exec</goal></goals>
+                            </execution>
+                        </executions>
+                        <configuration>
+                            <skip>${benchmark.skip}</skip>
+                            <executable>java</executable>
+                            <classpathScope>${benchmark.classpathScope}</classpathScope>
+                            <arguments>
+                                <argument>-classpath</argument>
+                                <classpath/>
+                                <argument>${benchmark.class}</argument>
+                            </arguments>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <!-- Env-var overrides for VoltDB versions -->
+        <profile>
+            <id>env-volt-client-version</id>
+            <activation><property><name>env.VOLT_CLIENT_VERSION</name></property></activation>
+            <properties><volt.client.version>${env.VOLT_CLIENT_VERSION}</volt.client.version></properties>
+        </profile>
+        <profile>
+            <id>env-volt-procedure-api-version</id>
+            <activation><property><name>env.VOLT_PROCEDURE_API_VERSION</name></property></activation>
+            <properties><volt.procedure.api.version>${env.VOLT_PROCEDURE_API_VERSION}</volt.procedure.api.version></properties>
+        </profile>
+        <profile>
+            <id>env-volt-testcontainer-version</id>
+            <activation><property><name>env.VOLT_TESTCONTAINER_VERSION</name></property></activation>
+            <properties><volt.testcontainer.version>${env.VOLT_TESTCONTAINER_VERSION}</volt.testcontainer.version></properties>
+        </profile>
+    </profiles>
+
+    <!-- Default benchmark classpath scope (children override per-project) -->
+    <!-- Set here so the benchmark profile in parent works even when not overridden -->
+</project>

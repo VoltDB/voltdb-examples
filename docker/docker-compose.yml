@@ -1,0 +1,348 @@
+# ============================================================================
+# Docker Compose for VoltDB Examples
+# ============================================================================
+# This compose file runs a VoltDB cluster and example applications
+#
+# Usage:
+#   # Start VoltDB only
+#   docker-compose up -d voltdb
+#
+#   # Run voter example (init + benchmark)
+#   docker-compose up voter
+#
+#   # Run with custom duration
+#   DURATION=60 docker-compose up voter
+#
+#   # Init only (load schema/procedures)
+#   MODE=init docker-compose up voter
+#
+#   # Run multiple examples
+#   docker-compose up voter voltkv
+#
+# License is REQUIRED for VoltDB Enterprise:
+#   export VOLTDB_LICENSE=/path/to/license.xml
+#
+# Without a valid license, VoltDB container will fail to start.
+# ============================================================================
+
+x-common-env: &common-env
+  VOLTDB_SERVERS: voltdb:21212
+  MODE: ${MODE:-init-run}
+  DURATION: ${DURATION:-120}
+  WARMUP: ${WARMUP:-5}
+  DISPLAY_INTERVAL: ${DISPLAY_INTERVAL:-5}
+  MAX_RETRIES: 60
+  RETRY_INTERVAL: 5
+
+services:
+  # ==========================================================================
+  # VoltDB Database Server
+  # ==========================================================================
+  voltdb:
+    image: ${VOLTDB_IMAGE:-voltactivedata/volt-developer-edition:15.2.0_voltdb}
+    container_name: voltdb
+    hostname: voltdb
+    command: /opt/voltdb/tools/kubernetes/test-entrypoint.sh
+    ports:
+      - "21212:21212"   # Client port
+      - "21211:21211"   # Admin port
+      - "8080:8080"     # HTTP/JSON API
+    environment:
+      VOLTDB_START_CONFIG: "--ignore=thp -c 1 -H voltdb"
+      VOLTDB_LICENSE: "/etc/voltdb/license.xml"
+      VOLTDB_DIR: /voltdb
+      VOLTDB_INIT_FORCE: "true"
+    volumes:
+      - voltdb-data:/voltdb
+      - voltdb-license-data:/etc/voltdb:ro
+    healthcheck:
+      test: ["CMD-SHELL", "sqlcmd --query='exec @Ping;'"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - voltdb-net
+
+  # ==========================================================================
+  # Voter Example
+  # ==========================================================================
+  voter:
+    build:
+      context: ..
+      dockerfile: voter/Dockerfile
+    image: voltdb-example-voter:latest
+    container_name: voter-client
+    depends_on:
+      voltdb:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      APP_NAME: voter
+      EXTRA_ARGS: "--contestants=${CONTESTANTS:-6} --maxvotes=${MAX_VOTES:-2}"
+    networks:
+      - voltdb-net
+
+  # ==========================================================================
+  # VoltKV Example
+  # ==========================================================================
+  voltkv:
+    build:
+      context: ..
+      dockerfile: voltkv/Dockerfile
+    image: voltdb-example-voltkv:latest
+    container_name: voltkv-client
+    depends_on:
+      voltdb:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      APP_NAME: voltkv
+      EXTRA_ARGS: "--poolsize=${POOL_SIZE:-100000} --getputratio=${GET_PUT_RATIO:-0.90}"
+    networks:
+      - voltdb-net
+
+  # ==========================================================================
+  # Bank-Offers Example
+  # ==========================================================================
+  bank-offers:
+    build:
+      context: ..
+      dockerfile: bank-offers/Dockerfile
+    image: voltdb-example-bank-offers:latest
+    container_name: bank-offers-client
+    depends_on:
+      voltdb:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      APP_NAME: bank-offers
+    networks:
+      - voltdb-net
+
+  # ==========================================================================
+  # Metrocard Example
+  # ==========================================================================
+  metrocard:
+    build:
+      context: ..
+      dockerfile: metrocard/Dockerfile
+    image: voltdb-example-metrocard:latest
+    container_name: metrocard-client
+    depends_on:
+      voltdb:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      APP_NAME: metrocard
+    networks:
+      - voltdb-net
+
+  # ==========================================================================
+  # DDoS Detection Example
+  # ==========================================================================
+  ddos-detection:
+    build:
+      context: ..
+      dockerfile: ddos-detection/Dockerfile
+    image: voltdb-example-ddos-detection:latest
+    container_name: ddos-detection-client
+    depends_on:
+      voltdb:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      APP_NAME: ddos-detection
+    networks:
+      - voltdb-net
+
+  # ==========================================================================
+  # Fraud Transaction Detection Example
+  # ==========================================================================
+  fraud-tx-detection:
+    build:
+      context: ..
+      dockerfile: fraud-tx-detection/Dockerfile
+    image: voltdb-example-fraud-tx-detection:latest
+    container_name: fraud-tx-detection-client
+    depends_on:
+      voltdb:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      APP_NAME: fraud-tx-detection
+    networks:
+      - voltdb-net
+
+  # ==========================================================================
+  # Ad Performance Example
+  # ==========================================================================
+  adperformance:
+    build:
+      context: ..
+      dockerfile: adperformance/Dockerfile
+    image: voltdb-example-adperformance:latest
+    container_name: adperformance-client
+    depends_on:
+      voltdb:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      APP_NAME: adperformance
+    networks:
+      - voltdb-net
+
+  # ==========================================================================
+  # Call Center Example
+  # ==========================================================================
+  callcenter:
+    build:
+      context: ..
+      dockerfile: callcenter/Dockerfile
+    image: voltdb-example-callcenter:latest
+    container_name: callcenter-client
+    depends_on:
+      voltdb:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      APP_NAME: callcenter
+    networks:
+      - voltdb-net
+
+  # NOTE: fraud-detection excluded - requires Apache Kafka
+
+  # ==========================================================================
+  # Geospatial Example
+  # ==========================================================================
+  geospatial:
+    build:
+      context: ..
+      dockerfile: geospatial/Dockerfile
+    image: voltdb-example-geospatial:latest
+    container_name: geospatial-client
+    depends_on:
+      voltdb:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      APP_NAME: geospatial
+    networks:
+      - voltdb-net
+
+  # ==========================================================================
+  # JSON Sessions Example
+  # ==========================================================================
+  json-sessions:
+    build:
+      context: ..
+      dockerfile: json-sessions/Dockerfile
+    image: voltdb-example-json-sessions:latest
+    container_name: json-sessions-client
+    depends_on:
+      voltdb:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      APP_NAME: json-sessions
+    networks:
+      - voltdb-net
+
+  # ==========================================================================
+  # NBBO Example
+  # ==========================================================================
+  nbbo:
+    build:
+      context: ..
+      dockerfile: nbbo/Dockerfile
+    image: voltdb-example-nbbo:latest
+    container_name: nbbo-client
+    depends_on:
+      voltdb:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      APP_NAME: nbbo
+    networks:
+      - voltdb-net
+
+  # ==========================================================================
+  # Position Keeper Example
+  # ==========================================================================
+  positionkeeper:
+    build:
+      context: ..
+      dockerfile: positionkeeper/Dockerfile
+    image: voltdb-example-positionkeeper:latest
+    container_name: positionkeeper-client
+    depends_on:
+      voltdb:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      APP_NAME: positionkeeper
+    networks:
+      - voltdb-net
+
+  # ==========================================================================
+  # Simple Example
+  # ==========================================================================
+  simple:
+    build:
+      context: ..
+      dockerfile: simple/Dockerfile
+    image: voltdb-example-simple:latest
+    container_name: simple-client
+    depends_on:
+      voltdb:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      APP_NAME: simple
+    networks:
+      - voltdb-net
+
+  # ==========================================================================
+  # Unique Devices Example
+  # ==========================================================================
+  uniquedevices:
+    build:
+      context: ..
+      dockerfile: uniquedevices/Dockerfile
+    image: voltdb-example-uniquedevices:latest
+    container_name: uniquedevices-client
+    depends_on:
+      voltdb:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      APP_NAME: uniquedevices
+    networks:
+      - voltdb-net
+
+  # ==========================================================================
+  # Windowing Example
+  # ==========================================================================
+  windowing:
+    build:
+      context: ..
+      dockerfile: windowing/Dockerfile
+    image: voltdb-example-windowing:latest
+    container_name: windowing-client
+    depends_on:
+      voltdb:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      APP_NAME: windowing
+    networks:
+      - voltdb-net
+
+volumes:
+  voltdb-data:
+  voltdb-license-data:
+    external: true
+
+networks:
+  voltdb-net:
+    driver: bridge

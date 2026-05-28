@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.voltdb</groupId>
+        <artifactId>examples</artifactId>
+        <version>1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>metrocard</artifactId>
+    <name>VoltDB Examples : Metrocard</name>
+
+    <properties>
+        <benchmark.class>metrocard.MetrocardBenchmarkRunner</benchmark.class>
+        <benchmark.classpathScope>test</benchmark.classpathScope>
+    </properties>
+
+    <dependencies>
+        <dependency><groupId>org.voltdb</groupId><artifactId>voltdbclient</artifactId></dependency>
+        <dependency><groupId>org.voltdb</groupId><artifactId>volt-procedure-api</artifactId></dependency>
+        <dependency><groupId>com.google.guava</groupId><artifactId>guava</artifactId></dependency>
+        <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-simple</artifactId><scope>runtime</scope></dependency>
+        <dependency><groupId>org.voltdb</groupId><artifactId>volt-testcontainer</artifactId><scope>test</scope></dependency>
+        <dependency><groupId>junit</groupId><artifactId>junit</artifactId><scope>test</scope></dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin><groupId>org.codehaus.mojo</groupId><artifactId>build-helper-maven-plugin</artifactId></plugin>
+
+            <!-- Maven Jar Plugin to create a separate procs classifier JAR -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.3.0</version>
+                <executions>
+                    <execution>
+                        <id>metrocard-procs</id>
+                        <goals>
+                            <goal>jar</goal>
+                        </goals>
+                        <phase>package</phase>
+                        <configuration>
+                            <finalName>metrocard</finalName>
+                            <classifier>procs</classifier>
+                            <includes>
+                                <include>metrocard/CardSwipe*</include>
+                                <include>metrocard/GetBusiestStationInLastMinute*</include>
+                                <include>metrocard/GetSwipesPerSecond*</include>
+                            </includes>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-failsafe-plugin</artifactId></plugin>
+        </plugins>
+    </build>
+</project>

@@ -1,0 +1,317 @@
+// ============================================================================
+// Jenkins Pipeline for VoltDB Examples - Docker Build and Test
+// ============================================================================
+// Builds Docker images for all example applications and tests them using
+// docker-compose with isolated VoltDB instances.
+//
+// Parameters:
+//   VOLTDB_IMAGE       - VoltDB Enterprise Docker image
+//   TEST_APPS          - Comma-separated list of apps to test
+//   BENCHMARK_DURATION - Benchmark duration in seconds
+//   SKIP_TESTS         - Skip docker-compose tests
+//
+// On master branch: Example images pushed to Docker Hub (voltdb/voltdb-enterprise-dev).
+// On other branches: Build and test only (no push)
+//
+// NOTE: The Docker Desktop Extension lives in the separate `voltdb-demo-runner`
+// repo and has its own pipeline (Jenkinsfile in that repo).
+// ============================================================================
+
+pipeline {
+    agent {
+        label 'gcloud-build--rocky-linux-8--x64'
+    }
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timeout(time: 4, unit: 'HOURS')
+        timestamps()
+        disableConcurrentBuilds()
+    }
+
+    parameters {
+        string(
+            name: 'VOLTDB_IMAGE',
+            defaultValue: 'voltdb/voltdb-enterprise:15.1.0',
+            description: 'VoltDB Enterprise Docker image to use'
+        )
+        string(
+            name: 'TEST_APPS',
+            defaultValue: 'voter,voltkv,bank-offers,ddos-detection,fraud-tx-detection,adperformance,callcenter,fraud-detection,geospatial,json-sessions,nbbo,positionkeeper,simple,uniquedevices,windowing',
+            description: 'Comma-separated list of apps to test (all 15 apps by default)'
+        )
+        string(
+            name: 'BENCHMARK_DURATION',
+            defaultValue: '60',
+            description: 'Benchmark duration in seconds'
+        )
+        booleanParam(
+            name: 'SKIP_TESTS',
+            defaultValue: false,
+            description: 'Skip docker-compose tests (build only)'
+        )
+    }
+
+    environment {
+        DOCKER_BUILDKIT = '1'
+        COMPOSE_DOCKER_CLI_BUILD = '1'
+        VOLTDB_IMAGE = "${params.VOLTDB_IMAGE}"
+        DOCKERHUB_REPO = 'voltdb/voltdb-enterprise-dev'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Setup') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'dockerhub',
+                        usernameVariable: 'DOCKER_CREDS_USR',
+                        passwordVariable: 'DOCKER_CREDS_PSW'
+                    ),
+                    string(
+                        credentialsId: 'VOLTDB_LICENSE1',
+                        variable: 'VOLTDB_LICENSE_CONTENT'
+                    )
+                ]) {
+                    sh '''
+                        # Login to Docker Hub
+                        echo "${DOCKER_CREDS_PSW}" | docker login -u "${DOCKER_CREDS_USR}" --password-stdin
+
+                        # Pull VoltDB image
+                        echo "Pulling VoltDB image: ${VOLTDB_IMAGE}"
+                        docker pull ${VOLTDB_IMAGE}
+
+                        # Decode license file
+                        echo "${VOLTDB_LICENSE_CONTENT}" | base64 -d > license.xml
+                        echo "License file created at ${WORKSPACE}/license.xml"
+                    '''
+                }
+            }
+        }
+
+        // ====================================================================
+        // Build Docker Images - Batch 1
+        // ====================================================================
+        stage('Build Images - Batch 1') {
+            parallel {
+                stage('voter') {
+                    steps {
+                        sh 'make -C docker build-voter'
+                    }
+                }
+                stage('voltkv') {
+                    steps {
+                        sh 'make -C docker build-voltkv'
+                    }
+                }
+                stage('bank-offers') {
+                    steps {
+                        sh 'make -C docker build-bank-offers'
+                    }
+                }
+                stage('client2') {
+                    steps {
+                        sh 'make -C docker build-client2'
+                    }
+                }
+            }
+        }
+
+        // ====================================================================
+        // Build Docker Images - Batch 2
+        // ====================================================================
+        stage('Build Images - Batch 2') {
+            parallel {
+                stage('ddos-detection') {
+                    steps {
+                        sh 'make -C docker build-ddos-detection'
+                    }
+                }
+                stage('fraud-tx-detection') {
+                    steps {
+                        sh 'make -C docker build-fraud-tx-detection'
+                    }
+                }
+                stage('adperformance') {
+                    steps {
+                        sh 'make -C docker build-adperformance'
+                    }
+                }
+                stage('callcenter') {
+                    steps {
+                        sh 'make -C docker build-callcenter'
+                    }
+                }
+            }
+        }
+
+        // ====================================================================
+        // Build Docker Images - Batch 3
+        // ====================================================================
+        stage('Build Images - Batch 3') {
+            parallel {
+                stage('fraud-detection') {
+                    steps {
+                        sh 'make -C docker build-fraud-detection'
+                    }
+                }
+                stage('geospatial') {
+                    steps {
+                        sh 'make -C docker build-geospatial'
+                    }
+                }
+                stage('json-sessions') {
+                    steps {
+                        sh 'make -C docker build-json-sessions'
+                    }
+                }
+                stage('nbbo') {
+                    steps {
+                        sh 'make -C docker build-nbbo'
+                    }
+                }
+            }
+        }
+
+        // ====================================================================
+        // Build Docker Images - Batch 4
+        // ====================================================================
+        stage('Build Images - Batch 4') {
+            parallel {
+                stage('positionkeeper') {
+                    steps {
+                        sh 'make -C docker build-positionkeeper'
+                    }
+                }
+                stage('simple') {
+                    steps {
+                        sh 'make -C docker build-simple'
+                    }
+                }
+                stage('uniquedevices') {
+                    steps {
+                        sh 'make -C docker build-uniquedevices'
+                    }
+                }
+                stage('windowing') {
+                    steps {
+                        sh 'make -C docker build-windowing'
+                    }
+                }
+            }
+        }
+
+        // ====================================================================
+        // Test Applications
+        // ====================================================================
+        stage('Test Applications') {
+            when {
+                expression { return !params.SKIP_TESTS }
+            }
+            steps {
+                withCredentials([
+                    string(
+                        credentialsId: 'VOLTDB_LICENSE1',
+                        variable: 'VOLTDB_LICENSE_CONTENT'
+                    )
+                ]) {
+                    sh '''
+                        # Decode license file from secret
+                        echo "${VOLTDB_LICENSE_CONTENT}" | base64 -d > "${WORKSPACE}/license.xml"
+
+                        # Set up environment for tests
+                        export VOLTDB_LICENSE="${WORKSPACE}/license.xml"
+                        export VOLTDB_IMAGE="${VOLTDB_IMAGE}"
+                        export DURATION="${BENCHMARK_DURATION}"
+
+                        # Convert comma-separated to space-separated
+                        TEST_APPS_LIST=$(echo "${TEST_APPS}" | tr ',' ' ')
+
+                        echo "Testing apps: ${TEST_APPS_LIST}"
+                        echo "Duration: ${DURATION}s per app"
+
+                        # Run tests
+                        ./docker/scripts/ci-test.sh ${TEST_APPS_LIST}
+                    '''
+                }
+            }
+        }
+
+        // ====================================================================
+        // Push Images to Docker Hub (master branch only)
+        // ====================================================================
+        // All example images push to a single Docker Hub repo as tags:
+        //   voltdb/voltdb-enterprise-dev:<app>-<version>
+        stage('Push Images to Docker Hub') {
+            when {
+                branch 'master'
+            }
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'dockerhub',
+                        usernameVariable: 'DOCKER_CREDS_USR',
+                        passwordVariable: 'DOCKER_CREDS_PSW'
+                    )
+                ]) {
+                    sh '''
+                        echo "${DOCKER_CREDS_PSW}" | docker login -u "${DOCKER_CREDS_USR}" --password-stdin
+
+                        echo "Pushing all images to ${DOCKERHUB_REPO}..."
+                        make -C docker push-all DOCKERHUB_REPO=${DOCKERHUB_REPO}
+
+                        echo "All images pushed successfully!"
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            // Archive benchmark logs
+            archiveArtifacts(
+                artifacts: '**/logs/*.log',
+                allowEmptyArchive: true,
+                fingerprint: false
+            )
+
+            // Cleanup
+            sh '''
+                # Remove license file
+                rm -f license.xml || true
+
+                # Logout from Docker Hub
+                docker logout || true
+
+                # Prune Docker resources
+                docker system prune -f || true
+
+                # Stop any running containers from this build
+                docker ps -q --filter "name=-voltdb" | xargs -r docker stop || true
+                docker ps -q --filter "name=-client" | xargs -r docker stop || true
+            '''
+
+            // Clean workspace
+            cleanWs()
+        }
+        success {
+            script {
+                if (env.BRANCH_NAME == 'master') {
+                    echo "Docker build, test, and push to ${DOCKERHUB_REPO} completed successfully!"
+                } else {
+                    echo 'Docker build and test completed successfully!'
+                }
+            }
+        }
+        failure {
+            echo 'Docker build or test failed!'
+        }
+    }
+}

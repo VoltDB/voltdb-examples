@@ -1,0 +1,64 @@
+# ============================================================================
+# Docker Compose for client2 Example
+# ============================================================================
+# Usage:
+#   # Set license path and run (defaults to SimpleSyncExample)
+#   VOLTDB_LICENSE=/path/to/license.xml docker-compose up
+#
+#   # Run a specific example
+#   VOLTDB_LICENSE=/path/to/license.xml MAIN_CLASS=org.voltdb.example.AsyncFlowControl docker-compose up
+#
+#   # Available examples:
+#   #   org.voltdb.example.SimpleSyncExample   (default)
+#   #   org.voltdb.example.SimpleAsyncExample
+#   #   org.voltdb.example.AsyncFlowControl
+# ============================================================================
+
+services:
+  voltdb:
+    image: ${VOLTDB_IMAGE:-voltdb/voltdb-enterprise:15.1.0}
+    platform: linux/amd64
+    container_name: client2-voltdb
+    hostname: voltdb
+    command: /opt/voltdb/tools/kubernetes/test-entrypoint.sh
+    ports:
+      - "${VOLTDB_CLIENT_PORT:-21212}:21212"
+      - "${VOLTDB_ADMIN_PORT:-21211}:21211"
+      - "${VOLTDB_HTTP_PORT:-8080}:8080"
+    environment:
+      VOLTDB_START_CONFIG: "--ignore=thp -c 1 -H voltdb"
+      VOLTDB_LICENSE: "/etc/voltdb/license.xml"
+      VOLTDB_DIR: /voltdb
+      VOLTDB_INIT_FORCE: "true"
+    volumes:
+      - voltdb-data:/voltdb
+      - ${VOLTDB_LICENSE:-./license.xml}:/etc/voltdb/license.xml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "sqlcmd --query='exec @Ping;' 2>/dev/null || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+    networks:
+      - app-net
+
+  app:
+    image: voltdb-example-client2:latest
+    container_name: client2-client
+    depends_on:
+      voltdb:
+        condition: service_healthy
+    environment:
+      VOLTDB_SERVERS: voltdb:21212
+      MODE: ${MODE:-run}
+      MAIN_CLASS: ${MAIN_CLASS:-org.voltdb.example.SimpleSyncExample}
+      DURATION: ${DURATION:-30}
+    networks:
+      - app-net
+
+volumes:
+  voltdb-data:
+
+networks:
+  app-net:
+    driver: bridge

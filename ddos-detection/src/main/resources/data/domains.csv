@@ -1,0 +1,6 @@
+DOMAIN,OWNER,MAX_REQUESTS_PER_IP
+example.com,Acme Corp,100
+shop.example.com,Acme Corp,50
+api.example.com,Acme Corp,200
+blog.example.com,Acme Corp,150
+cdn.example.com,Acme Corp,500

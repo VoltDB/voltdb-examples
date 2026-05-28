@@ -1,0 +1,83 @@
+# ============================================================================
+# Docker Compose for nbbo Example
+# ============================================================================
+# Usage:
+#   # Set license path and run
+#   docker-compose up
+#
+#   # Run with custom duration
+#   DURATION=60 docker-compose up
+#
+#   # Init only (load schema)
+#   MODE=init docker-compose up
+# ============================================================================
+
+services:
+  voltdb:
+    image: ${VOLTDB_IMAGE:-voltactivedata/volt-developer-edition:15.2.0_voltdb}
+    container_name: nbbo-voltdb
+    hostname: voltdb
+    command: /opt/voltdb/tools/kubernetes/test-entrypoint.sh
+    ports:
+      - "${VOLTDB_CLIENT_PORT:-21212}:21212"
+      - "${VOLTDB_ADMIN_PORT:-21211}:21211"
+      - "${VOLTDB_HTTP_PORT:-8080}:8080"
+    environment:
+      VOLTDB_START_CONFIG: "--ignore=thp -c 1 -H voltdb"
+      VOLTDB_LICENSE: "/etc/voltdb/license.xml"
+      VOLTDB_DIR: /voltdb
+      VOLTDB_INIT_FORCE: "true"
+    volumes:
+      - voltdb-data:/voltdb
+      - voltdb-license-data:/etc/voltdb:ro
+    healthcheck:
+      test: ["CMD-SHELL", "sqlcmd --query='exec @Ping;' 2>/dev/null || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+    networks:
+      - app-net
+
+  app:
+    image: voltdb-example-nbbo:latest
+    container_name: nbbo-client
+    depends_on:
+      voltdb:
+        condition: service_healthy
+    environment:
+      VOLTDB_SERVERS: voltdb:21212
+      MODE: ${MODE:-init-run}
+      DURATION: ${DURATION:-120}
+      WARMUP: ${WARMUP:-5}
+      DISPLAY_INTERVAL: ${DISPLAY_INTERVAL:-5}
+      nbbo: nbbo
+    networks:
+      - app-net
+
+  vmc:
+    image: ${VMC_IMAGE:-voltactivedata/volt-developer-edition:15.2.0_vmc}
+    platform: linux/amd64
+    container_name: nbbo-vmc
+    command: java -jar /opt/voltdb/volt-vmc-svc.jar --servers=voltdb --port=21212
+    profiles:
+      - vmc
+    depends_on:
+      voltdb:
+        condition: service_healthy
+    ports:
+      - "${VMC_PORT:-8081}:8080"
+    environment:
+      # This is to trick vmc into running as a standalone as we provide CLI args to run.
+      VOLTDB_CONTAINER: docker
+    networks:
+      - app-net
+
+volumes:
+  voltdb-data:
+  voltdb-license-data:
+    external: true
+
+networks:
+  app-net:
+    driver: bridge

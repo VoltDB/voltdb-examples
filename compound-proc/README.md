@@ -1,0 +1,33 @@
+# Volt compound procedure example
+
+This example demonstrates the use of the VoltCompoundProcedure feature, introduced in VoltDB V11.4.  A compound procedure is a non-transactional stored procedure that:
+
+- is coded in Java
+- executes in an instance of the VoltDB server
+- can call other 'regular' stored procedures
+- where these sub-procedures can be independently partitioned
+
+The example has a simple illustration of the use of a compound procedure. It looks up data in two tables (supposed customer data and parts data) and uses the result to update a third table, a 'pending orders' table. There is no pretence that this is a robust ordering system; the purpose of the example is just to show the coding.
+
+The client application is written the same way as if it were talking to a 'regular' Volt stored procedure.
+
+For more information, see under VoltCompoundProcedure in the VoltDB server Javadoc.
+
+Quickstart
+---------------------------
+Make sure "bin" inside the VoltDB kit is in your PATH.  Then open a shell and go to the examples/client-proc directory, then execute the following commands to start the database, and declare the compound procedures:
+
+    voltdb init
+    voltdb start
+
+Wait until you see "Server completed initialization."
+
+Open a new shell in the same directory, and run the following command to populate the database, then run the client application.
+
+    ./run.sh init client
+
+The client executes a single call to the 'user-provided' compound procedure.
+
+For more options, use
+
+    ./run.sh help

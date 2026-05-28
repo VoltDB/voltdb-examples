@@ -1,0 +1,98 @@
+-- VoltDB DDL Schema for Fraud Detection Demo
+
+-- Accounts table (primary partitioned table)
+CREATE TABLE ACCOUNTS (
+    ACCOUNT_ID bigint NOT NULL,
+    ENABLED tinyint DEFAULT 1 NOT NULL,
+    BALANCE decimal DEFAULT 0 NOT NULL,
+    DAILY_LIMIT decimal DEFAULT 5000 NOT NULL,
+    NAME varchar(50) NOT NULL,
+    EMAIL varchar(50) NOT NULL,
+    PRIMARY KEY (ACCOUNT_ID)
+);
+PARTITION TABLE ACCOUNTS ON COLUMN ACCOUNT_ID;
+
+-- Merchants table (replicated lookup table - small, read from any partition)
+CREATE TABLE MERCHANTS (
+    MERCHANT_ID integer NOT NULL,
+    NAME varchar(50) NOT NULL,
+    CATEGORY varchar(20) NOT NULL,
+    PRIMARY KEY (MERCHANT_ID)
+);
+
+-- Transactions table (co-located with ACCOUNTS on ACCOUNT_ID)
+CREATE TABLE TRANSACTIONS (
+    TXN_ID bigint NOT NULL,
+    ACCOUNT_ID bigint NOT NULL,
+    TXN_TIME timestamp NOT NULL,
+    MERCHANT_ID integer NOT NULL,
+    AMOUNT decimal NOT NULL,
+    DEVICE_ID varchar(32) NOT NULL,
+    ACCEPTED tinyint NOT NULL,
+    REASON varchar(100),
+    PRIMARY KEY (TXN_ID, ACCOUNT_ID)
+);
+PARTITION TABLE TRANSACTIONS ON COLUMN ACCOUNT_ID;
+CREATE INDEX TXN_TIME_IDX ON TRANSACTIONS (ACCOUNT_ID, TXN_TIME);
+
+-- Materialized views with TIME_WINDOW() for real-time fraud detection
+-- These are automatically maintained by VoltDB as transactions are inserted
+
+CREATE VIEW TXN_SUMMARY_30SEC (
+    ACCOUNT_ID,
+    WINDOW_30SEC,
+    TXN_COUNT,
+    TOTAL_SPENT
+) AS
+    SELECT ACCOUNT_ID,
+           TIME_WINDOW(SECOND, 30, TXN_TIME) AS WINDOW_30SEC,
+           COUNT(*) AS TXN_COUNT,
+           SUM(AMOUNT) AS TOTAL_SPENT
+    FROM TRANSACTIONS
+    GROUP BY ACCOUNT_ID, TIME_WINDOW(SECOND, 30, TXN_TIME);
+
+CREATE VIEW TXN_SUMMARY_1MIN (
+    ACCOUNT_ID,
+    WINDOW_1MIN,
+    TXN_COUNT,
+    TOTAL_SPENT
+) AS
+    SELECT ACCOUNT_ID,
+           TIME_WINDOW(SECOND, 60, TXN_TIME) AS WINDOW_1MIN,
+           COUNT(*) AS TXN_COUNT,
+           SUM(AMOUNT) AS TOTAL_SPENT
+    FROM TRANSACTIONS
+    GROUP BY ACCOUNT_ID, TIME_WINDOW(SECOND, 60, TXN_TIME);
+
+CREATE VIEW TXN_SUMMARY_5MIN (
+    ACCOUNT_ID,
+    WINDOW_5MIN,
+    TXN_COUNT,
+    TOTAL_SPENT
+) AS
+    SELECT ACCOUNT_ID,
+           TIME_WINDOW(SECOND, 300, TXN_TIME) AS WINDOW_5MIN,
+           COUNT(*) AS TXN_COUNT,
+           SUM(AMOUNT) AS TOTAL_SPENT
+    FROM TRANSACTIONS
+    GROUP BY ACCOUNT_ID, TIME_WINDOW(SECOND, 300, TXN_TIME);
+
+-- DDL-defined procedures (single SQL statement, no Java class needed)
+DROP PROCEDURE UpsertAccount IF EXISTS;
+CREATE PROCEDURE UpsertAccount
+    PARTITION ON TABLE ACCOUNTS COLUMN ACCOUNT_ID
+    AS UPSERT INTO ACCOUNTS (ACCOUNT_ID, ENABLED, BALANCE, DAILY_LIMIT, NAME, EMAIL) VALUES (?, ?, ?, ?, ?, ?);
+
+DROP PROCEDURE UpsertMerchant IF EXISTS;
+CREATE PROCEDURE UpsertMerchant
+    AS UPSERT INTO MERCHANTS (MERCHANT_ID, NAME, CATEGORY) VALUES (?, ?, ?);
+
+DROP PROCEDURE GetAccount IF EXISTS;
+CREATE PROCEDURE GetAccount
+    PARTITION ON TABLE ACCOUNTS COLUMN ACCOUNT_ID
+    AS SELECT * FROM ACCOUNTS WHERE ACCOUNT_ID = ?;
+
+-- Java class procedures (multiple SQL statements or Java logic)
+DROP PROCEDURE com.example.voltdb.procedures.ProcessTransaction IF EXISTS;
+CREATE PROCEDURE PARTITION ON TABLE TRANSACTIONS COLUMN ACCOUNT_ID
+    FROM CLASS com.example.voltdb.procedures.ProcessTransaction;
