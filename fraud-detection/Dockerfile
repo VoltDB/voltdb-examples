@@ -82,8 +82,12 @@ ENV DURATION=120
 ENV WARMUP=5
 ENV DISPLAY_INTERVAL=5
 ENV MODE=init-run
-# Load station and train data after DDL
-ENV CSV_LOADS="fd_stations:data/redline.csv,fd_trains:data/trains.csv"
+# Load station and train data after DDL.
+# IMPORTANT: entrypoint.sh splits CSV_LOADS on WHITESPACE (`for entry in $CSV_LOADS`),
+# not commas. A comma here makes the loop see a single entry, and the file path
+# becomes `data/redline.csv,fd_trains:data/trains.csv` — the loader then errors
+# with "CSV file not found: /app/data/redline.csv,fd_trains".
+ENV CSV_LOADS="fd_stations:data/redline.csv fd_trains:data/trains.csv"
 
 USER voltapp
 ENTRYPOINT ["/app/entrypoint.sh"]
