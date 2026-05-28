@@ -329,6 +329,11 @@ public class OfferBenchmark {
             PersonGenerator.Person p = gen.newPerson();
             //int ac = rand.nextInt(areaCodes.length);
 
+            // Honor Client2 backpressure during the bulk insert loop, otherwise
+            // we fire millions of async procedure calls and blow through the
+            // clientRequestLimit(20_000) before VoltDB can drain them.
+            while (backpressure.get()) LockSupport.parkNanos(1_000_000); // 1ms
+
             BenchmarkCallback cb = new BenchmarkCallback("CUSTOMER.insert");
             client.callProcedureAsync("CUSTOMER.insert",
                                  c,
@@ -346,6 +351,10 @@ public class OfferBenchmark {
             for (int a=0; a<accts; a++) {
 
                 int acct_no = (c*100)+a;
+
+                // Same backpressure guard for the nested account-insert loop.
+                while (backpressure.get()) LockSupport.parkNanos(1_000_000); // 1ms
+
                 BenchmarkCallback acb = new BenchmarkCallback("ACCOUNT.insert");
                 client.callProcedureAsync("ACCOUNT.insert",
                                      acct_no,
@@ -370,6 +379,9 @@ public class OfferBenchmark {
             if (v % 10000 == 0) {
                 System.out.println("  " + v);
             }
+
+            // Same backpressure guard as the customer/account loops above.
+            while (backpressure.get()) LockSupport.parkNanos(1_000_000); // 1ms
 
             BenchmarkCallback cb = new BenchmarkCallback("VENDOR_OFFERS.insert");
             client.callProcedureAsync("VENDOR_OFFERS.insert",
