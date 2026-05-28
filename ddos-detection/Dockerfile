@@ -4,7 +4,13 @@
 #
 # Build from repo root:
 #   docker build -t voltdb-example-ddos-detection -f ddos-detection/Dockerfile .
+#
+# Override the VoltDB base image at build time (e.g. for the gated enterprise
+# build, or a different version):
+#   docker build --build-arg VOLTDB_IMAGE=voltdb/voltdb-enterprise:15.2.0 ...
 # ============================================================================
+
+ARG VOLTDB_IMAGE=voltactivedata/volt-developer-edition:15.2.0_voltdb
 
 # ----------------------------------------------------------------------------
 # Stage 1: Build with Maven
@@ -43,7 +49,12 @@ RUN mvn package -pl ddos-detection -am -DskipTests -q && \
         -DincludeScope=runtime -q
 
 # ----------------------------------------------------------------------------
-# Stage 2: Runtime Image
+# Stage 2: VoltDB source (for sqlcmd and tools)
+# ----------------------------------------------------------------------------
+FROM ${VOLTDB_IMAGE} AS voltdb-source
+
+# ----------------------------------------------------------------------------
+# Stage 3: Runtime Image
 # ----------------------------------------------------------------------------
 FROM registry.access.redhat.com/ubi10-minimal:latest
 
@@ -70,7 +81,7 @@ RUN microdnf upgrade --refresh --assumeyes --best && \
 ENV JAVA_HOME=/usr/lib/jvm/jre-21-openjdk
 
 # Copy VoltDB installation for sqlcmd and tools
-COPY --from=voltdb/voltdb-enterprise:15.1.0 /opt/voltdb /opt/voltdb
+COPY --from=voltdb-source /opt/voltdb /opt/voltdb
 
 ENV VOLTDB_HOME=/opt/voltdb
 ENV PATH="${VOLTDB_HOME}/bin:${JAVA_HOME}/bin:${PATH}"
