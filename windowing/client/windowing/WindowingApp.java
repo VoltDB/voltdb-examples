@@ -26,6 +26,7 @@ package windowing;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.voltdb.CLIConfig;
@@ -141,6 +142,12 @@ public class WindowingApp {
     final MaxTracker maxTracker;
     final Reporter reporter;
 
+    /** Backpressure flag for the inserts Client2 — flipped on/off by the SDK
+     *  when Client2's internal queue is congested. The insert loop in
+     *  RandomDataInserter.run() parks while this is true so we don't overrun
+     *  Client2's request limit (the bug bank-offers used to hit). */
+    final AtomicBoolean insertsBackpressure = new AtomicBoolean(false);
+
     long getTargetRowsPerPartition() {
         return targetRowsPerPartition.get();
     }
@@ -204,7 +211,10 @@ public class WindowingApp {
         // Two separate Client2 instances are used: one for inserts (stats
         // tracked by the inserter) and another for everything else (deletes,
         // tracking, reporting). Each builds its own Client2Config.
-        Client2 insertsClient = ClientFactory.createClient(newClientConfig());
+        // The inserts client wires its backpressure handler into
+        // insertsBackpressure so the insert loop can throttle itself.
+        Client2 insertsClient = ClientFactory.createClient(
+                newClientConfig().requestBackpressureHandler(insertsBackpressure::set));
         client = ClientFactory.createClient(newClientConfig());
 
         // connect to one or more servers, loop until success

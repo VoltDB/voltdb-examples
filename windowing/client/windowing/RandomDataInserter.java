@@ -27,6 +27,7 @@ package windowing;
 import java.util.Date;
 import java.util.Random;
 import java.util.UUID;
+import java.util.concurrent.locks.LockSupport;
 
 import org.voltdb.client.Client2;
 import org.voltdb.client.ClientResponse;
@@ -130,6 +131,12 @@ public class RandomDataInserter {
         // Run in a loop for config.duration seconds.
         final long benchmarkEndTime = app.startTS + (1000l * app.config.duration);
         while (benchmarkEndTime > System.currentTimeMillis()) {
+
+            // Honor Client2 backpressure — without this, an unbounded loop of
+            // callProcedureAsync calls can overrun the SDK's internal request
+            // queue (same failure mode as bank-offers/OfferBenchmark
+            // experienced when its init loop bypassed this check).
+            while (app.insertsBackpressure.get()) LockSupport.parkNanos(1_000_000); // 1ms
 
             // GENERATE A RANDOM ROW
 
