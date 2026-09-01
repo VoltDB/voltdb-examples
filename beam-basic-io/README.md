@@ -338,15 +338,17 @@ Local orchestrator log is just the stdout of the `mvn exec:java` command.
 kubectl -n $NS exec basicio-voltdb-cluster-0 -- \
     sqlcmd --servers=localhost --query='DELETE FROM ACCOUNTS'
 
-# Full teardown — one shot. The namespace controller cascades the delete, so
-# the operator sees the VoltDBCluster being deleted BEFORE it's uninstalled
-# and clears voltdb.com/finalizer.pvc on the way out.
+# Full teardown — delete the VoltDBCluster CR FIRST so the operator can clear
+# voltdb.com/finalizer.pvc while it's still running, THEN delete the namespace.
+# `kubectl delete namespace` alone races: the operator pod gets terminated
+# before it clears the finalizer, and the namespace hangs in Terminating.
+kubectl -n $NS delete voltdbcluster --all --wait=true
 kubectl delete namespace $NS
 ```
 
-**Alternative** — to keep the namespace for reuse (remove only the helm
-release), delete the VoltDBCluster CR first so the operator can clear its
-finalizer before being uninstalled:
+**Reuse-friendly variant** — to keep the namespace (remove only the helm
+release, so you can rerun `helm install` later without redoing the pull-secret
++ SA patch):
 
 ```bash
 kubectl -n $NS delete voltdbcluster --all --wait=true
