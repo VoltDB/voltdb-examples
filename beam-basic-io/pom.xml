@@ -86,12 +86,9 @@
             <scope>test</scope>
         </dependency>
 
-        <dependency>
-            <groupId>org.voltdb</groupId>
-            <artifactId>voltdbclient</artifactId>
-            <version>${voltdb.version}</version>
-            <scope>test</scope>
-        </dependency>
+        <!-- voltdbclient is pulled transitively at compile scope from voltdb-beam-io.
+             Declaring it here at test scope would narrow the transitive scope and
+             break DataflowRunner at runtime (ClassNotFoundException: Client2). -->
 
         <dependency>
             <groupId>org.voltdb</groupId>
