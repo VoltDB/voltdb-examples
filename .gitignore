@@ -2,5 +2,10 @@
 **/*.iml
 **/target/
 **/node_modules/
+**/.DS_Store
 demo-runner/client/dist/
 demo-runner/package-lock.json
+
+# Local runbooks with real environment values
+**/RUNBOOK-local.md
+**/*.local.md

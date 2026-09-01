@@ -1,0 +1,58 @@
+package org.voltdb.beam.examples.basicio;
+
+import java.math.BigDecimal;
+import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+
+import org.apache.beam.sdk.Pipeline;
+import org.apache.beam.sdk.PipelineResult;
+import org.apache.beam.sdk.schemas.Schema;
+import org.apache.beam.sdk.transforms.Create;
+import org.apache.beam.sdk.values.Row;
+import org.voltdb.beam.sdk.io.voltdb.VoltDbIO;
+
+/**
+ * Bulk-loads reference-data ACCOUNTS via the connector's write path
+ * ({@link VoltDbIO#write()} calling the {@code UpsertAccount} stored procedure).
+ * UPSERT makes the operation idempotent under Beam's at-least-once retries.
+ */
+public final class LoadAccounts {
+
+    /** Row schema matching the ACCOUNTS table and the UpsertAccount parameter order. */
+    public static final Schema SCHEMA = Schema.builder()
+            .addInt32Field("ACCOUNT_ID")
+            .addStringField("NAME")
+            .addByteField("ENABLED")
+            .addDecimalField("BALANCE")
+            .addDecimalField("DAILY_LIMIT")
+            .build();
+
+    public static void run(BasicIoOptions options, VoltDbIO.ConnectionConfig conn) {
+        Pipeline p = Pipeline.create(options);
+
+        List<Row> rows = IntStream.range(0, options.getSeedCount())
+                .mapToObj(i -> Row.withSchema(SCHEMA)
+                        .addValues(
+                                i,
+                                "account-" + i,
+                                (byte) 1,
+                                new BigDecimal("10000.00"),
+                                new BigDecimal("5000.00"))
+                        .build())
+                .collect(Collectors.toList());
+
+        p.apply("SeedRows", Create.of(rows).withRowSchema(SCHEMA))
+                .apply("UpsertAccount", VoltDbIO.<Row>write()
+                        .withConnectionConfig(conn)
+                        .withProcedure("UpsertAccount")
+                        .withParameterMapper(new VoltDbIO.RowToParametersMapper()));
+
+        PipelineResult.State state = p.run().waitUntilFinish();
+        if (state != PipelineResult.State.DONE) {
+            throw new IllegalStateException("LoadAccounts pipeline finished in state " + state);
+        }
+    }
+
+    private LoadAccounts() {}
+}
