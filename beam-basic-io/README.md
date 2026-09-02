@@ -39,11 +39,15 @@ Standard Beam options (`--runner`, `--project`, `--region`, …) plus:
 | `--voltdbUser` | *(empty)* | VoltDB username (empty for no-auth) |
 | `--voltdbPassword` | *(empty)* | VoltDB password (empty for no-auth) |
 | `--seedCount` | `100` | Number of `ACCOUNTS` rows to seed |
+| `--connectionTimeoutMs` | `60000` | Initial TCP+TLS handshake timeout. Bump for cold Dataflow workers where the first connection can exceed the `voltdbclient` default |
 | `--sslEnabled` | `false` | Enable TLS for the client connection |
 | `--sslHostnameCheck` | `false` | Verify server hostname against the cert (only used when `--sslEnabled=true`) |
 | `--sslPropertyFile` | *(empty)* | SSL props file (trustStore/trustStorePassword/keyStore/keyStorePassword). Takes precedence over the direct flags below |
 | `--sslTrustStore` / `--sslTrustStorePassword` | *(empty)* | Path + password for the client trust store |
 | `--sslKeyStore` / `--sslKeyStorePassword` | *(empty)* | Path + password for the client key store (only for mTLS) |
+| `--secretManagerPasswordSecret` | *(empty)* | Secret Manager resource name (`projects/…/secrets/…/versions/…`) for the VoltDB password. Fetched on the worker at connect time; plaintext never enters the pipeline graph. Overrides `--voltdbPassword` |
+| `--secretManagerTrustStoreBytesSecret` | *(empty)* | Secret Manager resource for the trust store JKS bytes payload. Materialized to a temp file on the worker. Overrides `--sslTrustStore` |
+| `--secretManagerTrustStorePasswordSecret` | *(empty)* | Secret Manager resource for the trust store password. Overrides `--sslTrustStorePassword` |
 
 ---
 
@@ -59,10 +63,11 @@ Maven's `verify` phase triggers Failsafe, which starts a
 calls `BasicIoExample.main`, and shuts the container down. `main` runs the 4
 pipelines in sequence on the DirectRunner (no `--runner` flag).
 
+Run from the `voltdb-examples/beam-basic-io/` directory:
+
 ```bash
 # `verify` → failsafe → BasicIoExampleIT.allStepsSucceed → BasicIoExample.main → 4 DirectRunner pipelines (~10s)
-mvn -f examples/basic-io/pom.xml verify \
-    -Dvoltdb.license.path=/path/to/license.xml
+mvn verify -Dvoltdb.license.path=/path/to/license.xml
 ```
 
 ### Verify
@@ -81,9 +86,8 @@ BUILD SUCCESS
 
 ### Logs
 
-Failsafe reports live in `examples/basic-io/target/failsafe-reports/`. On
-failure, `BasicIoExampleIT.txt` in that directory contains the full stack
-trace.
+Failsafe reports live in `target/failsafe-reports/`. On failure,
+`BasicIoExampleIT.txt` in that directory contains the full stack trace.
 
 ---
 
@@ -100,6 +104,24 @@ Extra prerequisites:
 Placeholders used below: `<project>`, `<region>`, `<zone>`, `<cluster>`,
 `<bucket>`, `<voltdb-operator-path>`, `<license-path>`, `<src-ns>` (namespace
 holding the pull secret).
+
+### Dataflow deployment patterns
+
+This section walks through the simplest path — plain `mvn exec:java` against
+a no-security VoltDB cluster. Two other deployment patterns are covered in
+the connector's Dataflow deployment guide:
+
+- **Custom SDK worker image** — bake certs into a Beam SDK worker image and
+  run via `mvn exec:java --sdkContainerImage=…`. Simplest way to add SSL.
+- **Flex Template + Secret Manager** — pipeline packaged as a Dataflow
+  Flex Template; passwords and cert JKS bytes come from Secret Manager at
+  worker time. Nothing sensitive lives on the worker image or in the
+  pipeline graph. Uses the single-pipeline entry point
+  `WriteAccountsMain` (Flex Templates only allow one pipeline graph per
+  template).
+
+Full walk-through with cert / Secret Manager setup:
+[voltdb-apache-beam/docs/dataflow-ssl-deployment.md](https://github.com/VoltDB/voltdb-apache-beam/blob/main/docs/dataflow-ssl-deployment.md).
 
 ### 1. One-time project setup
 
@@ -156,8 +178,8 @@ helm install basicio <voltdb-operator-path>/charts/voltdb-operator \
     --set cluster.clusterSpec.image.tag=15.3.0 \
     --set cluster.config.deployment.cluster.kfactor=0
 
-# Load the DDL into the running cluster
-cat examples/basic-io/src/main/resources/ddl.sql \
+# Load the DDL into the running cluster (from the beam-basic-io/ project dir)
+cat src/main/resources/ddl.sql \
     | kubectl exec -i -n $NS basicio-voltdb-cluster-0 -- \
         sqlcmd --servers=localhost
 
@@ -209,7 +231,7 @@ kubectl exec -n $NS basicio-voltdb-cluster-0 -- \
 VOLTDB_IP=$(kubectl -n $NS get svc basicio-voltdb-ilb \
     -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
 
-mvn -f examples/basic-io/pom.xml compile exec:java -Pdataflow-runner -B \
+mvn compile exec:java -Pdataflow-runner -B \
     -Dexec.mainClass=org.voltdb.beam.examples.basicio.BasicIoExample \
     -Dexec.args="\
 --runner=DataflowRunner \

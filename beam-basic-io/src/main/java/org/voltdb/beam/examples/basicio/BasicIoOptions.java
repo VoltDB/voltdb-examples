@@ -1,7 +1,9 @@
 package org.voltdb.beam.examples.basicio;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.beam.sdk.options.Default;
 import org.apache.beam.sdk.options.Description;
+import org.apache.beam.sdk.options.Hidden;
 import org.apache.beam.sdk.options.PipelineOptions;
 
 /**
@@ -20,6 +22,12 @@ public interface BasicIoOptions extends PipelineOptions {
     String getVoltdbUser();
     void setVoltdbUser(String value);
 
+    // @Hidden hides the option from --help and from Beam's DisplayData for the
+    // pipeline; @JsonIgnore excludes it from the PipelineOptions JSON that
+    // Dataflow displays in the job info panel. Together they keep the
+    // plaintext password out of every visible surface.
+    @Hidden
+    @JsonIgnore
     @Description("VoltDB password. Empty for no-auth clusters.")
     @Default.String("")
     String getVoltdbPassword();
@@ -29,6 +37,13 @@ public interface BasicIoOptions extends PipelineOptions {
     @Default.Integer(100)
     int getSeedCount();
     void setSeedCount(int value);
+
+    @Description("Timeout in ms for the initial TCP+TLS handshake to VoltDB. Increase for cold Dataflow "
+            + "workers where the first connection (worker cold-start plus TLS handshake) can exceed "
+            + "voltdbclient defaults.")
+    @Default.Integer(60000)
+    int getConnectionTimeoutMs();
+    void setConnectionTimeoutMs(int value);
 
     // --- SSL / TLS ---
 
@@ -53,6 +68,8 @@ public interface BasicIoOptions extends PipelineOptions {
     String getSslTrustStore();
     void setSslTrustStore(String value);
 
+    @Hidden
+    @JsonIgnore
     @Description("Password for --sslTrustStore.")
     @Default.String("")
     String getSslTrustStorePassword();
@@ -63,8 +80,33 @@ public interface BasicIoOptions extends PipelineOptions {
     String getSslKeyStore();
     void setSslKeyStore(String value);
 
+    @Hidden
+    @JsonIgnore
     @Description("Password for --sslKeyStore.")
     @Default.String("")
     String getSslKeyStorePassword();
     void setSslKeyStorePassword(String value);
+
+    // --- Secret Manager integration ---
+
+    @Description("Secret Manager resource name (projects/PROJECT/secrets/SECRET/versions/VERSION) "
+            + "for the VoltDB password. When set, the plaintext is fetched on the worker at "
+            + "connect time and never enters the pipeline graph. Overrides --voltdbPassword.")
+    @Default.String("")
+    String getSecretManagerPasswordSecret();
+    void setSecretManagerPasswordSecret(String value);
+
+    @Description("Secret Manager resource name for the SSL trust store password. When set, "
+            + "the plaintext is fetched on the worker at connect time. Overrides --sslTrustStorePassword.")
+    @Default.String("")
+    String getSecretManagerTrustStorePasswordSecret();
+    void setSecretManagerTrustStorePasswordSecret(String value);
+
+    @Description("Secret Manager resource name for the SSL trust store JKS file (raw bytes payload). "
+            + "When set, the connector fetches the payload on the worker, materializes it to a temp "
+            + "file, and hands that path to Client2Config — no cert file needs to live on the worker "
+            + "image or in GCS in unprotected form. Overrides --sslTrustStore.")
+    @Default.String("")
+    String getSecretManagerTrustStoreBytesSecret();
+    void setSecretManagerTrustStoreBytesSecret(String value);
 }

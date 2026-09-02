@@ -1,5 +1,6 @@
 package org.voltdb.beam.examples.basicio;
 
+import com.google.cloud.secretmanager.v1.SecretManagerServiceClient;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,13 +42,21 @@ public final class BasicIoExample {
         LOG.info("Basic-io example completed successfully.");
     }
 
-    private static VoltDbIO.ConnectionConfig buildConnection(BasicIoOptions options) {
+    // Package-private so WriteAccountsMain (Flex Template entry point) can
+    // reuse the same connection wiring.
+    static VoltDbIO.ConnectionConfig buildConnection(BasicIoOptions options) {
         VoltDbIO.ConnectionConfig.Builder b = VoltDbIO.connectionConfig()
-                .withHosts(options.getVoltdbHosts());
+                .withHosts(options.getVoltdbHosts())
+                .withConnectionTimeout(options.getConnectionTimeoutMs());
         if (!options.getVoltdbUser().isEmpty()) {
             b.withUsername(options.getVoltdbUser());
         }
-        if (!options.getVoltdbPassword().isEmpty()) {
+        // Password: Secret Manager wins over plaintext. When neither is set the
+        // cluster is assumed to be no-auth.
+        if (!options.getSecretManagerPasswordSecret().isEmpty()) {
+            final String secretName = options.getSecretManagerPasswordSecret();
+            b.withPasswordSupplier(() -> fetchSecret(secretName));
+        } else if (!options.getVoltdbPassword().isEmpty()) {
             b.withPassword(options.getVoltdbPassword());
         }
         if (options.getSslEnabled()) {
@@ -58,14 +67,63 @@ public final class BasicIoExample {
             if (!options.getSslPropertyFile().isEmpty()) {
                 b.withSslPropertyFile(options.getSslPropertyFile());
             }
-            if (!options.getSslTrustStore().isEmpty()) {
-                b.withTrustStore(options.getSslTrustStore(), options.getSslTrustStorePassword());
+            // Trust store: Secret Manager bytes-supplier > Secret Manager password + local path
+            // > plaintext.
+            if (!options.getSecretManagerTrustStoreBytesSecret().isEmpty()) {
+                final String tsBytesSecret = options.getSecretManagerTrustStoreBytesSecret();
+                b.withTrustStoreBytesSupplier(() -> fetchSecretBytes(tsBytesSecret));
+                if (!options.getSecretManagerTrustStorePasswordSecret().isEmpty()) {
+                    final String tsPwSecret = options.getSecretManagerTrustStorePasswordSecret();
+                    b.withTrustStorePasswordSupplier(() -> fetchSecret(tsPwSecret));
+                } else if (!options.getSslTrustStorePassword().isEmpty()) {
+                    b.withTrustStorePasswordSupplier(options::getSslTrustStorePassword);
+                }
+            } else if (!options.getSslTrustStore().isEmpty()) {
+                if (!options.getSecretManagerTrustStorePasswordSecret().isEmpty()) {
+                    final String tsSecret = options.getSecretManagerTrustStorePasswordSecret();
+                    b.withTrustStore(options.getSslTrustStore())
+                     .withTrustStorePasswordSupplier(() -> fetchSecret(tsSecret));
+                } else {
+                    b.withTrustStore(options.getSslTrustStore(), options.getSslTrustStorePassword());
+                }
             }
             if (!options.getSslKeyStore().isEmpty()) {
                 b.withKeyStore(options.getSslKeyStore(), options.getSslKeyStorePassword());
             }
         }
         return b.build();
+    }
+
+    /**
+     * Fetch a plaintext secret payload from Google Cloud Secret Manager.
+     * Called on the worker at ConnectionConfig.createClient() time via a
+     * SerializableSupplier — the plaintext never enters the pipeline graph.
+     * The caller passes a fully-qualified resource name of the form
+     * {@code projects/PROJECT/secrets/SECRET/versions/VERSION}.
+     */
+    private static String fetchSecret(String secretResourceName) {
+        try (SecretManagerServiceClient client = SecretManagerServiceClient.create()) {
+            return client.accessSecretVersion(secretResourceName)
+                    .getPayload().getData().toStringUtf8();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to fetch Secret Manager secret "
+                    + secretResourceName, e);
+        }
+    }
+
+    /**
+     * Fetch a binary secret payload (e.g., a JKS file) from Secret Manager.
+     * Same lifecycle as {@link #fetchSecret} — resolved on the worker at
+     * connect time via a SerializableSupplier, never in the pipeline graph.
+     */
+    private static byte[] fetchSecretBytes(String secretResourceName) {
+        try (SecretManagerServiceClient client = SecretManagerServiceClient.create()) {
+            return client.accessSecretVersion(secretResourceName)
+                    .getPayload().getData().toByteArray();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to fetch Secret Manager secret bytes "
+                    + secretResourceName, e);
+        }
     }
 
     private static void step(String name, Runnable body) {
