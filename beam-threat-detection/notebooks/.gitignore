@@ -2,3 +2,9 @@
 *.executed.ipynb
 *.executed.html
 .ipynb_checkpoints/
+
+# Local scratch — timestamped PNG snapshots kept across chart iterations.
+# The named .live.png / .synthetic.png files in images/ ARE committed —
+# they document each chart's current look so reviewers see them without
+# needing to execute the notebooks.
+images/backup/

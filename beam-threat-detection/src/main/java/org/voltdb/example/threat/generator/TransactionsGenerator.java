@@ -1,4 +1,25 @@
-/* SPDX-License-Identifier: MIT */
+/* This file is part of VoltDB.
+ * Copyright (C) 2026 Volt Active Data Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be
+ * included in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+ * IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ * OTHER DEALINGS IN THE SOFTWARE.
+ */
 package org.voltdb.example.threat.generator;
 
 import org.slf4j.Logger;
@@ -171,12 +192,18 @@ public final class TransactionsGenerator {
      * Warm one subnet with 501+ PAGE requests, then a txn from that subnet →
      * SUBNET_PAGE_HIT_RATE. Uses the same subnet (78.46.220.0/24) as
      * {@link #seedSubnetTxnRateRejection}; the two scenarios are spaced far
-     * enough apart in time (20s vs 55s) that the 5-second rate window has
+     * enough apart in time (70s vs 100s) that the 5-second rate window has
      * fully decayed between them, so each rule fires cleanly in isolation.
+     *
+     * <p>Timing also stays past {@link #seedAcceptedBatch}'s 30-second
+     * VELOCITY_BURST window — otherwise account 4's accepted txns from the
+     * batch (same account used here) would stack with the attacker txn and
+     * trip VELOCITY_BURST before SUBNET_PAGE_HIT_RATE is even evaluated
+     * (VELOCITY_BURST is checked first in ProcessTransaction).
      */
     private static void seedSubnetPageHitRateRejection(ThreatDetectionApp app, long baseTime,
                                                        AtomicInteger rej) throws Exception {
-        long t = baseTime + 20_000;
+        long t = baseTime + 70_000;
         long base = System.nanoTime() & 0x7FFFFFFFL;
         String attackerIp = "78.46.220.42"; // Hetzner — Germany (real geo, useful for maps)
         String subnet = CidrUtils.extractSubnet(attackerIp, 24);
@@ -196,7 +223,10 @@ public final class TransactionsGenerator {
     /** Warm one subnet with 21+ TXN requests, then a txn from that subnet → SUBNET_TXN_RATE. */
     private static void seedSubnetTxnRateRejection(ThreatDetectionApp app, long baseTime,
                                                    AtomicInteger rej) throws Exception {
-        long t = baseTime + 55_000;
+        // 100s = 30s after the SUBNET_PAGE_HIT_RATE scenario's +70s window, so the
+        // 5s page-rate counter has fully decayed by now and we don't accidentally
+        // re-trip SUBNET_PAGE_HIT_RATE (which is checked before SUBNET_TXN_RATE).
+        long t = baseTime + 100_000;
         long base = System.nanoTime() & 0x7FFFFFFFL;
         String attackerIp = "78.46.220.1"; // Hetzner — Germany (real geo, useful for maps)
         String subnet = CidrUtils.extractSubnet(attackerIp, 24);
