@@ -1,0 +1,4 @@
+.venv/
+*.executed.ipynb
+*.executed.html
+.ipynb_checkpoints/
