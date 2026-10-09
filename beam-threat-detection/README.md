@@ -1,96 +1,130 @@
-# beam-threat-detection — end-to-end demo of the VoltDB Beam connector
+# beam-threat-detection
 
-**Status:** scaffolding only. Not yet buildable end-to-end. See `RUNBOOK.md` for phased delivery plan.
+End-to-end example of the [VoltDB Apache Beam connector](https://central.sonatype.com/artifact/org.voltdb/voltdb-beam-io) running on Google Cloud Dataflow. Shows a real-time multi-source threat-detection system where **page-hit signals and transaction signals share a VoltDB counter** that the fraud-check stored procedure reads atomically — so a bot that scans a web site from one subnet gets its subsequent transaction from that same subnet rejected before the charge is executed.
 
-**Related tickets:** [ENG-29805](https://issuesvolt.atlassian.net/browse/ENG-29805) (V2 demo) · [ENG-29804](https://issuesvolt.atlassian.net/browse/ENG-29804) (connector productization parent).
+> **Accompanying blog post:** [Multi-source threat detection on GCP with VoltDB + Apache Beam](https://medium.com/@mpopova/<PLACEHOLDER-REPLACE-WITH-MEDIUM-URL>) — walkthrough of the three-path architecture and how the connector plays each role. The charts below are the ones embedded in that post.
 
-**Design docs (external, in `~/Marina/Docs/Voltdb-Beam/`):**
-- `threat-detection-v2-architecture-options.md` — every option considered and why we chose Option E
-- `threat-detection-v2-outline.md` — this project's outline, blog post plan, phased delivery
+## What this example demonstrates
 
----
+A real-time threat/fraud pipeline on GCP where:
 
-## What this demo shows
+- A Java microservice (`ThreatDetectionApp`) calls VoltDB stored procedures per transaction for atomic rule evaluation.
+- A **Beam streaming pipeline on Dataflow** (`PageHitsIngestPipeline`) uses `VoltDbIO.write` to ingest high-volume page-hit events from PubSub into VoltDB's `SUBNET_REQUESTS` counter.
+- A **Beam batch pipeline on Dataflow** (`ReportingPipeline`) uses `VoltDbIO.read` to pull new transactions out of VoltDB, enriches them with MaxMind GeoIP, and writes to BigQuery + an Apache Iceberg mirror on GCS for warehouse analytics.
 
-An end-to-end threat detection system on Google Cloud that uses VoltDB as the real-time state store and the Apache Beam VoltDB connector (`voltdb-beam-io`) to move data in and out of Beam pipelines running on Dataflow.
+Because page hits and transactions both write to the same per-subnet counter inside VoltDB, the transaction-processing SP sees the composite signal with per-request latency. A bot scan at 100 req/s pushes the subnet's hit counter past threshold within seconds, and the attacker's next transaction attempt from that subnet is rejected atomically — not minutes later from a dashboard.
 
-**The scenario in one paragraph:** a bot scans your public website from a single subnet — product pages, login page, help pages — at 100 requests/second. If the system only tracks transactions, this scan is invisible; when the bot finally attempts fraud, its transaction is the FIRST from that subnet, so a per-transaction rate rule sees a count of 1 and lets it through. In this architecture, page hits are also written into VoltDB, into a separate per-subnet counter that the transaction-processing stored procedure reads atomically alongside its own per-account rules. The scan pushes the subnet's page-hit count past threshold within seconds, so when the fraudulent transaction arrives, the SP sees a hot subnet signal and rejects it atomically — before the charge is executed. A real-time fraud/threat system that reads signals across sources with per-request latency, in ~500 lines of Java.
+## Charts
+
+Both charts are produced by Jupyter notebooks under `notebooks/`. The PNG renders checked in under `notebooks/images/` are kept in sync with each notebook's current output so reviewers can see the current look without executing them.
+
+**Chart 1 — subnet-rate rules timeline + world map:**
+![Chart 1 — live BigQuery render](notebooks/images/chart1_subnet_rate_timeline.live.png)
+
+**Chart 2 — SUBNET_TXN_RATE and VELOCITY_BURST on one timeline:**
+![Chart 2 — synthetic render](notebooks/images/chart2_txn_velocity_timeline.synthetic.png)
+
+Each notebook has a `USE_BQ` toggle at the top: `True` queries the live warehouse tables for the attacker-subnet story, `False` uses hard-coded data that illustrates the same scenario shapes without any BigQuery dependency.
 
 ## Architecture — three real-time paths
 
 ```
-── Path 1: Transaction real-time (unchanged from V1) ────────────
-User request → ThreatDetectionMicroservice → VoltDB SPs
-                                              (RecordSubnetRequest → subnet count,
-                                               ProcessTransaction → ACCEPT/REJECT)
-                     SP results drive accept/reject + UI feedback
+── Path 1 — Transaction real-time ──────────────────────────────────
+User request → ThreatDetectionApp → VoltDB SPs
+                                      (RecordSubnetRequest → subnet count,
+                                       ProcessTransaction  → ACCEPT/REJECT)
+                SP results drive accept/reject + UI feedback
 
-── Path 2: Page-hits real-time (NEW — Beam + connector) ─────────
-PubSub topic (page-hit events)
-    → PageHitIngestPipeline (Beam streaming, Dataflow)
+── Path 2 — Page-hits streaming ingest (Beam + connector) ──────────
+PubSub topic (threat-page-hits)
+    → PageHitsIngestPipeline (Beam streaming, Dataflow)
        → VoltDbIO.write("RecordSubnetRequest")
              fire-and-forget: return value ignored
              async pipelined: high-volume page hits saturate the write path
 
-── Path 3: Reporting (NEW — Beam + connector + Iceberg + BQ) ────
-Cloud Scheduler (every 2-5 min)
+── Path 3 — Reporting + warehouse (Beam + connector + BQ + Iceberg) ─
+./bin/run-reporting-pipeline.sh  (or Cloud Scheduler on a cadence)
     → ReportingPipeline (Beam batch, Dataflow)
-       1. Read watermark: SELECT MAX(TXN_TIME) FROM analytics.transactions
+       1. Watermark: SELECT MAX(TXN_TIME) FROM BigQuery.transactions
        2. VoltDbIO.read().withProcedure("ReadTxnsSince", watermark)
-             server-side JOIN with ACCOUNTS + MERCHANTS
+             SP output includes a server-side JOIN with ACCOUNTS + MERCHANTS
        3. GeoIP enrichment via MaxMind side input (GeoIpEnrichFn)
        4. Parallel sinks:
-             ├─ IcebergIO.writeRows → analytics.transactions_iceberg
-             └─ BigQueryIO.write    → analytics.transactions
+             ├─ BigQueryIO.write    → BigQuery.transactions (native)
+             └─ Managed.ICEBERG     → gs://.../transactions/ (Iceberg mirror)
 ```
 
-Full architecture diagram + rationale: `docs/architecture.mmd` (once rendered).
+See `src/main/java/org/voltdb/example/threat/pipelines/` for the two Beam pipelines and `src/main/java/com/voltactivedata/example/threat/procedures/` for the VoltDB SPs.
 
 ## Repo layout
 
 ```
 beam-threat-detection/
-├── pom.xml                                  Maven single-module project
-├── README.md                                this file
-├── RUNBOOK.md                               phased delivery + day-2 ops
-├── docs/                                    architecture diagram (Mermaid)
-├── bin/                                     launcher scripts for each component
-├── src/main/java/org/voltdb/example/threat/
-│   ├── common/                              CidrUtils, PageHitEvent
-│   ├── procedures/                          VoltDB stored procedures (ProcessTransaction, RecordSubnetRequest)
-│   ├── microservice/                        Path 1: transaction real-time (ThreatDetectionMicroservice, VoltDBSetup)
-│   ├── generator/                           PageHitGenerator (feeds PubSub)
-│   └── pipelines/                           Path 2 + Path 3 Beam pipelines
+├── pom.xml
+├── README.md                                   this file
+├── bin/
+│   ├── run-ingest-pipeline.sh                  launch Path 2 on Dataflow
+│   ├── run-reporting-pipeline.sh               launch Path 3 on Dataflow
+│   ├── run-narrative-scene.sh                  single-process demo scenario (NarrativeScene)
+│   └── generate-page-hits.sh                   ad-hoc PageHitsGenerator wrapper
+├── src/main/java/
+│   ├── com/voltactivedata/example/threat/procedures/   VoltDB stored procedures (deployed into the cluster)
+│   │   ├── ProcessTransaction.java             per-txn rule evaluator (atomic)
+│   │   └── RecordSubnetRequest.java            counter writer (shared by Path 1 + Path 2)
+│   └── org/voltdb/example/threat/
+│       ├── common/                             PageHitEvent, CidrUtils, CsvDataLoader
+│       ├── app/                                ThreatDetectionApp — Client2 wrapper for Path 1
+│       ├── pipelines/                          PageHitsIngestPipeline, ReportingPipeline, GeoIpEnrichFn
+│       └── generator/                          PageHitsGenerator, TransactionsGenerator, NarrativeScene
 ├── src/main/resources/
-│   ├── voltdb-ddl.sql                       V1 schema + V2 SOURCE_TYPE addition
-│   ├── bigquery-ddl.sql                     Destination table + Iceberg schema
-│   ├── data/                                Reference data CSVs
-│   └── application.properties.template      Config template
-└── src/test/java/org/voltdb/example/threat/ IT tests (Testcontainers-based)
+│   ├── voltdb-ddl.sql                          schema + materialised views for rate counters
+│   ├── bigquery-ddl.sql                        warehouse tables (BQ native + BQ-Iceberg)
+│   ├── data/                                   seed account + merchant CSVs + the URL catalog
+│   └── application.properties.template         config placeholders
+├── src/test/java/                              Testcontainer-backed integration tests (mvn verify)
+└── notebooks/
+    ├── chart1_subnet_rate_timeline.ipynb       subnet-rate rules + world map
+    ├── chart2_txn_velocity_timeline.ipynb      SUBNET_TXN_RATE × VELOCITY_BURST interaction
+    └── images/                                 committed PNG renders of both charts
 ```
 
 ## Prerequisites
 
 - JDK 11+
 - Maven 3.6+
-- Docker (for Testcontainers IT tests)
-- VoltDB Enterprise license (Developer Edition license works too — see the
-  `beam-basic-io` example's README for how to swap the test image)
-- Google Cloud project with PubSub, Dataflow, BigQuery, and (optionally) GCS +
-  Iceberg catalog — only needed for GCP runs, not for local IT
+- Docker (for the Testcontainer-backed integration tests)
+- A VoltDB licence file. The pom pins `voltdb.image.version` in `src/test/resources/test.properties`.
+- For GCP end-to-end runs only: a Google Cloud project with PubSub, Dataflow, BigQuery, GCS, and a BigQuery `CLOUD_RESOURCE` connection pointing at a GCS bucket (used by the Iceberg-formatted raw page-hit table). `gcloud auth application-default login` once per workstation.
 
-## Quick start (local, Testcontainers)
+## Running the tests locally
 
-*Not yet implemented — see `RUNBOOK.md` Phase 0.*
+```bash
+mvn verify
+```
 
-## Quick start (GCP Dataflow)
+Runs unit tests and the Testcontainer-backed integration tests, which spin up a VoltDB container, load the schema + stored procedures, exercise `ThreatDetectionApp` end-to-end, and verify the ingest + reporting pipelines against a real VoltDB (sinks are mocked). No GCP access required.
 
-*Not yet implemented — see `RUNBOOK.md` Phases 1-3.*
+## Running the demo on GCP
 
-## VoltDB schema — V2 delta vs V1
+Provisioning (one-time: PubSub topics, BigQuery dataset + Iceberg-formatted table, VoltDB cluster on GKE, Dataflow prerequisites), day-to-day operations, and teardown are in [`RUNBOOK.md`](RUNBOOK.md). Copy `runbook.env.template` → `runbook.env`, edit, and `source` it before running the sections there.
 
-The `SUBNET_REQUESTS` table gains a `SOURCE_TYPE varchar(4) DEFAULT 'TXN'` column so it can capture entries from both real-time paths. The `REQUESTS_PER_SUBNET` TIME_WINDOW materialized view aggregates across BOTH source types — no filter on `SOURCE_TYPE` — so the subnet-rate rule sees the combined count. See `src/main/resources/voltdb-ddl.sql` for the full DDL with inline commentary.
+With the infrastructure in place, the full flow is three commands:
+
+```bash
+# 1. Streaming ingest pipeline (long-running on Dataflow; one-time per demo cycle)
+./bin/run-ingest-pipeline.sh
+
+# 2. Fire the end-to-end narrative scenario (~2 min, publishes to PubSub + fires txns)
+./bin/run-narrative-scene.sh
+
+# 3. Report new VoltDB txns into BigQuery + Iceberg (~5 min, batch Dataflow)
+./bin/run-reporting-pipeline.sh
+```
+
+Each script wraps `mvn exec:java` with the full argument list; override per-run defaults via env vars (see the comment headers in each `bin/` script).
+
+Both notebooks under `notebooks/` can then be executed against the populated BigQuery tables (set `USE_BQ = True` in the first config cell).
 
 ## License
 
-MIT (matches the rest of `voltdb-examples`).
+MIT — matches the rest of `voltdb-examples`.

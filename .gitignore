@@ -1,4 +1,4 @@
-.idea/**
+**/.idea/
 **/*.iml
 **/target/
 **/node_modules/
@@ -9,3 +9,4 @@ demo-runner/package-lock.json
 # Local runbooks with real environment values
 **/RUNBOOK-local.md
 **/*.local.md
+**/runbook.env
