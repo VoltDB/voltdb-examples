@@ -1,0 +1,17 @@
+page_url,category
+/,home
+/products,catalog
+/products/premium-account,catalog
+/products/business-account,catalog
+/pricing,marketing
+/login,auth
+/register,auth
+/help,support
+/help/faq,support
+/help/contact,support
+/blog,content
+/blog/security-tips,content
+/api/docs,docs
+/api/status,docs
+/legal/terms,legal
+/legal/privacy,legal

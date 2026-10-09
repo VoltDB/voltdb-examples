@@ -1,0 +1,36 @@
+# Config template — copy to application.properties and fill in.
+
+# --- VoltDB connection ------------------------------------------------------
+voltdb.hosts=localhost:21212
+voltdb.user=
+voltdb.password=
+
+# --- CIDR subnet extraction --------------------------------------------------
+# Prefix length for the subnet counter (24 = /24, 28 = /28). Higher = finer-grained.
+cidr.prefix=24
+
+# --- GCP -------------------------------------------------------------------
+gcp.project=<your-project>
+gcp.region=us-central1
+
+# --- PubSub (Path 2: page-hit ingest) ---------------------------------------
+pubsub.pageHits.topic=projects/<your-project>/topics/threat-page-hits
+pubsub.pageHits.subscription=projects/<your-project>/subscriptions/threat-page-hits-sub
+
+# --- BigQuery + Iceberg (Path 3: reporting) --------------------------------
+bigquery.dataset=<your-dataset>
+bigquery.transactionsTable=<your-dataset>.transactions
+iceberg.catalogUri=<your-iceberg-catalog>
+iceberg.warehouseLocation=gs://<your-bucket>/iceberg-warehouse
+
+# --- MaxMind GeoIP -----------------------------------------------------------
+# Path or GCS URI to the MaxMind GeoLite2-City .mmdb file used by GeoIpEnrichFn.
+maxmind.mmdb.path=gs://<your-bucket>/maxmind/GeoLite2-City.mmdb
+
+# --- Page-hit generator ------------------------------------------------------
+# Steady baseline (spread across many random IPs — should NOT trip the rule).
+generator.steady.rate=100
+# Bot scan burst mode (all events from a single /24 CIDR block — WILL trip the rule).
+generator.botScan.subnet=203.0.113.0/24
+generator.botScan.rate=200
+generator.botScan.durationSec=30

@@ -1,0 +1,17 @@
+# Python deps for the beam-threat-detection analysis notebooks.
+# Install with: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+
+# BigQuery client + pandas DataFrame integration (BQ returns DECIMAL/NUMERIC via db_dtypes)
+google-cloud-bigquery>=3.20.0
+db-dtypes>=1.2.0
+
+# Data manipulation
+pandas>=2.2.0
+
+# Charts
+plotly>=5.20.0
+
+# Notebook infrastructure
+jupyter>=1.0.0
+notebook>=7.1.0
+nbconvert>=7.16.0

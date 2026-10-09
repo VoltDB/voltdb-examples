@@ -1,0 +1,278 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>org.voltdb.beam.examples</groupId>
+    <artifactId>voltdb-beam-threat-detection-example</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+
+    <name>VoltDB Beam Connector - Threat Detection example</name>
+    <description>End-to-end threat-detection demo showcasing the VoltDB Beam
+        connector in a realistic GCP architecture. Two Beam pipelines feed
+        VoltDB state (page-hit ingest via VoltDbIO.write) and read it out
+        (scheduled reporting via VoltDbIO.read + Iceberg + BigQuery), while a
+        Java microservice handles the transaction real-time path directly.</description>
+
+    <properties>
+        <beam.version>2.74.0</beam.version>
+        <voltdb.beam.version>1.0.0</voltdb.beam.version>
+        <!-- TODO: bump to 16.0.0 once it publishes to Maven Central. -->
+        <voltdb.version>15.3.0</voltdb.version>
+        <slf4j.version>2.0.9</slf4j.version>
+        <google.cloud.libraries.version>26.44.0</google.cloud.libraries.version>
+        <maxmind.geoip2.version>4.2.1</maxmind.geoip2.version>
+        <!-- Aligned with Beam 2.74's transitive Jackson. -->
+        <jackson.version>2.15.4</jackson.version>
+
+        <maven.compiler.source>11</maven.compiler.source>
+        <maven.compiler.target>11</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>com.google.cloud</groupId>
+                <artifactId>libraries-bom</artifactId>
+                <version>${google.cloud.libraries.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <!-- VoltDB Beam connector — the whole point of this example. -->
+        <dependency>
+            <groupId>org.voltdb</groupId>
+            <artifactId>voltdb-beam-io</artifactId>
+            <version>${voltdb.beam.version}</version>
+        </dependency>
+
+        <!-- VoltDB client (transitively provided by voltdb-beam-io, but
+             declared explicitly because the microservice + generator use it). -->
+        <dependency>
+            <groupId>org.voltdb</groupId>
+            <artifactId>voltdbclient</artifactId>
+            <version>${voltdb.version}</version>
+        </dependency>
+
+        <!-- volt-procedure-api — the small public API jar (VoltProcedure,
+             VoltTable, etc.) needed to compile stored procedure classes.
+             Provided at runtime by the VoltDB server. -->
+        <dependency>
+            <groupId>org.voltdb</groupId>
+            <artifactId>volt-procedure-api</artifactId>
+            <version>${voltdb.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Beam SDK -->
+        <dependency>
+            <groupId>org.apache.beam</groupId>
+            <artifactId>beam-sdks-java-core</artifactId>
+            <version>${beam.version}</version>
+        </dependency>
+
+        <!-- Beam I/O: PubSub source + BigQuery sink + Iceberg sink -->
+        <dependency>
+            <groupId>org.apache.beam</groupId>
+            <artifactId>beam-sdks-java-io-google-cloud-platform</artifactId>
+            <version>${beam.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.beam</groupId>
+            <artifactId>beam-sdks-java-managed</artifactId>
+            <version>${beam.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.beam</groupId>
+            <artifactId>beam-sdks-java-io-iceberg</artifactId>
+            <version>${beam.version}</version>
+        </dependency>
+
+        <!-- Direct runner for local dev / IT. -->
+        <dependency>
+            <groupId>org.apache.beam</groupId>
+            <artifactId>beam-runners-direct-java</artifactId>
+            <version>${beam.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- MaxMind GeoIP2 — used by the reporting pipeline as a Beam side input
+             for inline GeoIP enrichment. -->
+        <dependency>
+            <groupId>com.maxmind.geoip2</groupId>
+            <artifactId>geoip2</artifactId>
+            <version>${maxmind.geoip2.version}</version>
+        </dependency>
+
+        <!-- Google Cloud PubSub client — used by the page-hit generator (a plain
+             Java process, not a Beam pipeline). Version managed by libraries-bom. -->
+        <dependency>
+            <groupId>com.google.cloud</groupId>
+            <artifactId>google-cloud-pubsub</artifactId>
+        </dependency>
+
+        <!-- BigQuery client — used by ReportingPipeline.main() to query the
+             watermark (SELECT MAX(TXN_TIME) FROM ...) synchronously before
+             pipeline construction. Beam's BigQueryIO handles the sink writes.
+             Version managed by libraries-bom. -->
+        <dependency>
+            <groupId>com.google.cloud</groupId>
+            <artifactId>google-cloud-bigquery</artifactId>
+        </dependency>
+
+        <!-- GCS client — GeoIpEnrichFn downloads the MaxMind .mmdb file from
+             GCS at worker cold-start. Version managed by libraries-bom. -->
+        <dependency>
+            <groupId>com.google.cloud</groupId>
+            <artifactId>google-cloud-storage</artifactId>
+        </dependency>
+
+        <!-- Jackson — JSON (de)serialization for PageHitEvent on the PubSub wire.
+             Declared explicitly so the wire format stays independent of Beam's
+             transitive Jackson version. -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+
+        <!-- Logging -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>${slf4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+            <version>${slf4j.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- Test dependencies -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.10.2</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.beam</groupId>
+            <artifactId>beam-sdks-java-core</artifactId>
+            <version>${beam.version}</version>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.beam</groupId>
+            <artifactId>beam-sdks-java-test-utils</artifactId>
+            <version>${beam.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.voltdb</groupId>
+            <artifactId>volt-testcontainer</artifactId>
+            <version>1.12.0</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <version>1.21.4</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.11.0</version>
+            </plugin>
+
+            <!-- Builds a secondary jar containing ONLY the stored-procedure
+                 classes. VoltDBCluster.loadClasses() takes this jar so DDL that
+                 references FROM CLASS ... resolves at cluster startup. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.3.0</version>
+                <executions>
+                    <execution>
+                        <id>procedures-jar</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>jar</goal>
+                        </goals>
+                        <configuration>
+                            <classifier>procedures</classifier>
+                            <includes>
+                                <include>com/voltactivedata/example/threat/procedures/**</include>
+                            </includes>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <version>3.2.2</version>
+                <configuration>
+                    <includes>
+                        <include>**/*IT.java</include>
+                    </includes>
+                    <systemPropertyVariables>
+                        <!-- Path to the procedures jar. IntegrationTestBase.getProjectJar()
+                             reads this and passes it to VoltDBCluster.loadClasses() before
+                             DDL runs, so FROM CLASS references resolve at container startup. -->
+                        <project.jar.path>${project.build.directory}/${project.build.finalName}-procedures.jar</project.jar.path>
+                    </systemPropertyVariables>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.1.1</version>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <!-- Enables the Dataflow runner for GCP runs. Activate with -Pdataflow-runner. -->
+        <profile>
+            <id>dataflow-runner</id>
+            <dependencies>
+                <dependency>
+                    <groupId>org.apache.beam</groupId>
+                    <artifactId>beam-runners-google-cloud-dataflow-java</artifactId>
+                    <version>${beam.version}</version>
+                    <scope>runtime</scope>
+                </dependency>
+            </dependencies>
+        </profile>
+    </profiles>
+</project>
